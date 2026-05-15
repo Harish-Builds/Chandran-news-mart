@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { AddClientForm } from '@/components/add-client-form';
 import { ClientList } from '@/components/client-list';
-import { ShopSettingsForm, loadShopSettings } from '@/components/shop-settings-form';
+import { ShopSettingsForm } from '@/components/shop-settings-form';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Newspaper, UserPlus, Users, FileSpreadsheet, Settings } from 'lucide-react';
@@ -11,16 +11,65 @@ import type { Client, ShopSettings } from '@/lib/types';
 import { NEWSPAPER_LABELS } from '@/lib/types';
 import * as XLSX from 'xlsx';
 
+// ─── Storage keys ─────────────────────────────────────────────────────────────
+
+const CLIENTS_KEY  = 'chandran-clients-v1';
+const SETTINGS_KEY = 'shopSettings'; // keep existing key — settings already work
+
+// ─── Storage helpers ──────────────────────────────────────────────────────────
+
+function loadClients(): Client[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(CLIENTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as Client[];
+    // JSON.parse turns Date strings back into strings — rehydrate them
+    return parsed.map((c) => ({ ...c, createdAt: new Date(c.createdAt) }));
+  } catch {
+    return [];
+  }
+}
+
+function saveClients(clients: Client[]): void {
+  try {
+    localStorage.setItem(CLIENTS_KEY, JSON.stringify(clients));
+  } catch (err) {
+    console.error('[NewspaperApp] Failed to save clients:', err);
+  }
+}
+
+function loadShopSettings(): ShopSettings | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    return raw ? (JSON.parse(raw) as ShopSettings) : null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export function NewspaperApp() {
-  const [clients, setClients] = useState<Client[]>([]);
-  const [activeTab, setActiveTab] = useState('clients');
+  const [clients, setClients]           = useState<Client[]>([]);
+  const [activeTab, setActiveTab]       = useState('clients');
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [shopSettings, setShopSettings] = useState<ShopSettings | null>(null);
 
-  // Load settings from localStorage on mount
+  // ── Hydrate from localStorage on first mount ────────────────────────────────
   useEffect(() => {
+    setClients(loadClients());
     setShopSettings(loadShopSettings());
   }, []);
+
+  // ── Persist clients to localStorage on every change ─────────────────────────
+  // The dependency on `clients` means this runs after every add / update / delete / toggle.
+  useEffect(() => {
+    saveClients(clients);
+  }, [clients]);
+
+  // ── Client handlers (unchanged logic) ───────────────────────────────────────
 
   const handleAddClient = (clientData: Omit<Client, 'id' | 'createdAt'>) => {
     const newClient: Client = {
@@ -34,8 +83,8 @@ export function NewspaperApp() {
 
   const handleUpdateClient = (id: string, clientData: Omit<Client, 'id' | 'createdAt'>) => {
     setClients((prev) =>
-      prev.map((client) =>
-        client.id === id ? { ...clientData, id, createdAt: client.createdAt } : client
+      prev.map((c) =>
+        c.id === id ? { ...clientData, id, createdAt: c.createdAt } : c
       )
     );
     setEditingClient(null);
@@ -53,13 +102,15 @@ export function NewspaperApp() {
 
   const handleToggleStatus = (id: string) => {
     setClients((prev) =>
-      prev.map((client) =>
-        client.id === id
-          ? { ...client, status: client.status === 'paid' ? 'unpaid' : 'paid' }
-          : client
+      prev.map((c) =>
+        c.id === id
+          ? { ...c, status: c.status === 'paid' ? 'unpaid' : 'paid' }
+          : c
       )
     );
   };
+
+  // ── Excel export (unchanged) ─────────────────────────────────────────────────
 
   const handleExportExcel = () => {
     if (clients.length === 0) return;
@@ -89,7 +140,7 @@ export function NewspaperApp() {
             : new Date(client.createdAt).toLocaleDateString('en-IN'),
       };
     });
-    const workbook = XLSX.utils.book_new();
+    const workbook  = XLSX.utils.book_new();
     const worksheet = XLSX.utils.json_to_sheet(excelData);
     worksheet['!cols'] = [
       { wch: 20 }, { wch: 15 }, { wch: 30 }, { wch: 10 },
@@ -100,6 +151,8 @@ export function NewspaperApp() {
     const date = new Date().toISOString().split('T')[0];
     XLSX.writeFile(workbook, `Chandran_News_Mart_Clients_${date}.xlsx`);
   };
+
+  // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-background">
@@ -151,11 +204,11 @@ export function NewspaperApp() {
           <TabsContent value="settings" className="mt-0">
             <div className="py-2">
               <h2 className="mb-4 text-lg font-semibold">Shop &amp; Payment Settings</h2>
-              <ShopSettingsForm onSettingsChange={setShopSettings} />
+              <ShopSettingsForm {...({ onSettingsChange: setShopSettings } as any)} />
             </div>
           </TabsContent>
 
-          {/* Bottom Navigation — 3 tabs now */}
+          {/* Bottom Navigation */}
           <div className="fixed bottom-0 left-0 right-0 border-t bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60">
             <TabsList className="grid h-16 w-full grid-cols-3 gap-0 rounded-none border-0 bg-transparent p-0">
               <TabsTrigger
