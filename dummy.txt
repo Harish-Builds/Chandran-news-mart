@@ -1,0 +1,15 @@
+vectorvishnu@gmail.com
+    -supabase acc --free limit
+    #password:C1H2A3N4D5R6A7N8
+
+
+client form page
+    -start date
+    -prepaid
+    
+
+Clients page
+    --Due extend days calculation from start date
+    -inactive client feature, client delete option
+    -sort order by highest due expire date according to paid and unpaid
+    

@@ -21,6 +21,9 @@ import {
   Loader2,
   Fuel,
   Pencil,
+  AlertTriangle,
+  Clock,
+  UserX,
 } from 'lucide-react';
 import type { Client, ShopSettings } from '@/lib/types';
 import { NEWSPAPER_LABELS } from '@/lib/types';
@@ -35,6 +38,7 @@ interface ClientCardProps {
   onToggleStatus: (id: string) => void;
   onEdit: (client: Client) => void;
   shopSettings: ShopSettings | null;
+  overdueDays?: number;
 }
 
 function WhatsAppIcon({ className }: { className?: string }) {
@@ -55,6 +59,7 @@ export function ClientCard({
   onToggleStatus,
   onEdit,
   shopSettings,
+  overdueDays,
 }: ClientCardProps) {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [qrCode, setQrCode] = useState<string | null>(null);
@@ -63,19 +68,22 @@ export function ClientCard({
   const [isSending, setIsSending] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
 
+  const isOverdue = client.status === 'unpaid' && overdueDays !== undefined && overdueDays > 0;
+  const isInactive = client.status === 'inactive';
+
   const currentMonth = new Date().toLocaleDateString('en-US', {
     month: 'long',
     year: 'numeric',
   });
 
   const shopName = shopSettings?.shopName || 'Chandran News Mart';
+  const hasUpi = !!(shopSettings?.upiId);
 
   const newspaperItems = client.newspapers.map((np) => ({
     label: NEWSPAPER_LABELS[np.newspaper],
     amount: np.monthlyAmount,
   }));
 
-  // ── Full reminder message sent as WhatsApp text ──────────────────
   const getReminderMessage = () => {
     const paperLines = client.newspapers
       .map((np) => `📰 ${NEWSPAPER_LABELS[np.newspaper]} — ₹${np.monthlyAmount}`)
@@ -161,11 +169,8 @@ Thank you for your continued subscription! 🙏
 
       const fileName = `Payment-${client.name.replace(/\s+/g, '-')}-${currentMonth}.png`;
       const imageFile = new File([blobToShare], fileName, { type: 'image/png' });
-
-      // Full reminder text used both as share text and wa.me fallback
       const message = getReminderMessage();
 
-      // Mobile: Web Share API sends image + text together to WhatsApp
       if (navigator.canShare && navigator.canShare({ files: [imageFile] })) {
         await navigator.share({
           title: `Newspaper Subscription Reminder — ${currentMonth}`,
@@ -176,13 +181,9 @@ Thank you for your continued subscription! 🙏
         return;
       }
 
-      // Desktop fallback:
-      // 1. Open WhatsApp chat pre-filled with the full reminder text
-      // 2. Download the composite image so the user can attach it manually
       const waUrl = getWhatsAppUrl(client.phoneNumber, message);
       window.open(waUrl, '_blank');
 
-      // Small delay so the tab opens before the download fires
       await new Promise((r) => setTimeout(r, 400));
       downloadComposite();
 
@@ -197,7 +198,6 @@ Thank you for your continued subscription! 🙏
         return;
       }
       console.error('Share failed:', error);
-      // Still try the text-only fallback
       const waUrl = getWhatsAppUrl(client.phoneNumber, getReminderMessage());
       window.open(waUrl, '_blank');
       setShareError('Image share failed. WhatsApp opened with text — attach the image manually.');
@@ -213,43 +213,81 @@ Thank you for your continued subscription! 🙏
     const link = document.createElement('a');
     link.href = url;
     link.download = `Payment-${client.name.replace(/\s+/g, '-')}-${currentMonth}.png`;
-    document.body.appendChild(link);
     link.click();
-    document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
 
-  const hasUpi = Boolean(shopSettings?.upiId);
+  // Card border / bg styling based on state
+  const cardClassName = isInactive
+    ? 'border-0 shadow-sm opacity-60 bg-muted/40'
+    : isOverdue
+      ? 'border-l-4 border-l-destructive shadow-md bg-destructive/5 dark:bg-destructive/10'
+      : 'border-0 shadow-sm';
 
   return (
     <>
-      <Card className="border-0 shadow-md transition-shadow hover:shadow-lg">
-        <CardContent className="p-4">
+      <Card className={cardClassName}>
+        <CardContent className="p-3.5">
           <div className="flex flex-col gap-3">
-            {/* Header */}
+
+            {/* Overdue Banner */}
+            {isOverdue && (
+              <div className="flex items-center gap-2 rounded-md bg-destructive/10 border border-destructive/20 px-2.5 py-1.5 -mx-0.5">
+                <AlertTriangle className="size-3.5 text-destructive shrink-0" />
+                <span className="text-xs font-semibold text-destructive">
+                  Overdue by {overdueDays} day{overdueDays !== 1 ? 's' : ''}
+                </span>
+              </div>
+            )}
+
+            {/* Inactive Banner */}
+            {isInactive && (
+              <div className="flex items-center gap-2 rounded-md bg-amber-100/80 border border-amber-200 px-2.5 py-1.5 -mx-0.5 dark:bg-amber-950/30 dark:border-amber-800">
+                <UserX className="size-3.5 text-amber-700 dark:text-amber-400 shrink-0" />
+                <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">Inactive Client</span>
+              </div>
+            )}
+
+            {/* Header: Name + Badge */}
             <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="truncate text-base font-semibold text-foreground">
-                    {client.name}
-                  </h3>
-                  <Badge
-                    variant={client.status === 'paid' ? 'default' : 'destructive'}
-                    className="shrink-0"
-                  >
-                    {client.status === 'paid' ? (
-                      <CheckCircle2 className="mr-1 size-3" />
-                    ) : (
-                      <XCircle className="mr-1 size-3" />
-                    )}
-                    {client.status === 'paid' ? 'Paid' : 'Unpaid'}
-                  </Badge>
-                </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="font-semibold text-foreground text-sm leading-tight truncate">
+                  {client.name}
+                </h3>
+                {client.startDate && (
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <Clock className="size-3 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">
+                      Since {new Date(client.startDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-col items-end gap-1 shrink-0">
+                <Badge
+                  variant={client.status === 'paid' ? 'default' : client.status === 'inactive' ? 'secondary' : 'destructive'}
+                  className={`text-xs px-2 py-0.5 ${
+                    client.status === 'paid'
+                      ? 'bg-green-500/15 text-green-700 border-green-500/30 dark:text-green-400'
+                      : client.status === 'inactive'
+                        ? 'bg-muted text-muted-foreground'
+                        : 'bg-red-500/15 text-red-700 border-red-500/30 dark:text-red-400'
+                  }`}
+                >
+                  {client.status === 'paid' ? (
+                    <CheckCircle2 className="size-3 mr-1" />
+                  ) : client.status === 'inactive' ? (
+                    <UserX className="size-3 mr-1" />
+                  ) : (
+                    <XCircle className="size-3 mr-1" />
+                  )}
+                  {client.status === 'paid' ? 'Paid' : client.status === 'inactive' ? 'Inactive' : 'Unpaid'}
+                </Badge>
               </div>
             </div>
 
             {/* Details */}
-            <div className="flex flex-col gap-1.5 text-sm text-muted-foreground">
+            <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">
               <div className="flex items-center gap-2">
                 <Phone className="size-3.5 shrink-0" />
                 <span className="truncate">{client.phoneNumber}</span>
@@ -260,7 +298,7 @@ Thank you for your continued subscription! 🙏
               </div>
               <div className="flex items-start gap-2">
                 <Newspaper className="mt-0.5 size-3.5 shrink-0" />
-                <span className="text-xs">
+                <span className="leading-relaxed">
                   {client.newspapers.map((np, idx) => (
                     <span key={np.newspaper}>
                       {NEWSPAPER_LABELS[np.newspaper]} (₹{np.monthlyAmount})
@@ -272,90 +310,109 @@ Thank you for your continued subscription! 🙏
               {client.petrolCharges > 0 && (
                 <div className="flex items-center gap-2">
                   <Fuel className="size-3.5 shrink-0" />
-                  <span className="text-xs">Petrol: ₹{client.petrolCharges}</span>
+                  <span>Petrol: ₹{client.petrolCharges}</span>
                 </div>
               )}
             </div>
 
-            {/* Amount */}
-            <div className="flex items-center gap-2 rounded-lg bg-primary/10 px-3 py-2">
-              <IndianRupee className="size-4 text-primary" />
-              <span className="text-lg font-bold text-primary">
-                ₹{client.totalAmount.toLocaleString('en-IN')}
-              </span>
-              <span className="text-xs text-muted-foreground">/month</span>
+            {/* Amount row */}
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 rounded-lg bg-primary/10 px-2.5 py-1.5 flex-1">
+                <IndianRupee className="size-3.5 text-primary" />
+                <span className="text-base font-bold text-primary">
+                  ₹{client.totalAmount.toLocaleString('en-IN')}
+                </span>
+                <span className="text-xs text-muted-foreground">/mo</span>
+              </div>
+              {(client.prepaidAmount ?? 0) > 0 && (
+                <div className="rounded-lg bg-green-500/10 border border-green-500/20 px-2.5 py-1.5 text-right">
+                  <p className="text-xs text-green-700 dark:text-green-400 font-medium">
+                    Prepaid ₹{(client.prepaidAmount ?? 0).toLocaleString('en-IN')}
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Actions */}
-            <div className="flex gap-2">
+            {!isInactive ? (
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onEdit(client)}
+                  className="h-9 w-9 shrink-0 p-0"
+                  aria-label="Edit client"
+                >
+                  <Pencil className="size-3.5" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onToggleStatus(client.id)}
+                  className="h-9 flex-1 text-xs font-medium"
+                >
+                  {client.status === 'paid' ? 'Mark Unpaid' : 'Mark Paid'}
+                </Button>
+                <Button
+                  onClick={handleWhatsAppClick}
+                  className="h-9 flex-1 gap-1.5 bg-[#25D366] text-white hover:bg-[#20BD5A] text-xs font-medium"
+                  size="sm"
+                >
+                  <WhatsAppIcon className="size-3.5" />
+                  Remind
+                </Button>
+              </div>
+            ) : (
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => onEdit(client)}
-                className="h-10 w-10 shrink-0 p-0"
-                aria-label="Edit client"
+                className="h-9 w-full text-xs font-medium"
               >
-                <Pencil className="size-4" />
+                <Pencil className="size-3.5 mr-1.5" />
+                Edit / Reactivate
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onToggleStatus(client.id)}
-                className="h-10 flex-1 text-xs"
-              >
-                {client.status === 'paid' ? 'Mark Unpaid' : 'Mark Paid'}
-              </Button>
-              <Button
-                onClick={handleWhatsAppClick}
-                className="h-10 flex-1 gap-2 bg-[#25D366] text-white hover:bg-[#20BD5A]"
-                size="sm"
-              >
-                <WhatsAppIcon className="size-4" />
-                Remind
-              </Button>
-            </div>
+            )}
           </div>
         </CardContent>
       </Card>
 
       {/* Payment Reminder Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-[92vw] rounded-xl sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle className="text-center">Payment Reminder</DialogTitle>
+            <DialogTitle className="text-center text-base">Payment Reminder</DialogTitle>
             <DialogDescription className="sr-only">
               Send a payment reminder with QR code to {client.name} via WhatsApp
             </DialogDescription>
           </DialogHeader>
 
-          <div className="flex flex-col items-center gap-4 py-2">
+          <div className="flex flex-col items-center gap-3 py-1">
             <div className="text-center">
-              <p className="font-medium">{client.name}</p>
+              <p className="font-medium text-sm">{client.name}</p>
               <p className="text-xs text-muted-foreground">
                 {client.newspapers.map((np) => NEWSPAPER_LABELS[np.newspaper]).join(', ')}
               </p>
             </div>
 
             {/* Breakdown */}
-            <div className="w-full rounded-lg bg-secondary p-4">
+            <div className="w-full rounded-lg bg-secondary p-3">
               <div className="flex flex-col gap-1 text-sm">
                 {client.newspapers.map((np) => (
                   <div key={np.newspaper} className="flex justify-between">
-                    <span className="text-muted-foreground">
-                      {NEWSPAPER_LABELS[np.newspaper]}
-                    </span>
-                    <span>₹{np.monthlyAmount}</span>
+                    <span className="text-muted-foreground text-xs">{NEWSPAPER_LABELS[np.newspaper]}</span>
+                    <span className="text-xs">₹{np.monthlyAmount}</span>
                   </div>
                 ))}
                 {client.petrolCharges > 0 && (
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Petrol Charges</span>
-                    <span>₹{client.petrolCharges}</span>
+                    <span className="text-muted-foreground text-xs">Petrol</span>
+                    <span className="text-xs">₹{client.petrolCharges}</span>
                   </div>
                 )}
                 <div className="mt-2 flex justify-between border-t pt-2">
-                  <span className="font-medium">Total Due</span>
-                  <span className="text-xl font-bold text-primary">
+                  <span className="font-medium text-sm">Total Due</span>
+                  <span className="text-lg font-bold text-primary">
                     ₹{client.totalAmount.toLocaleString('en-IN')}
                   </span>
                 </div>
@@ -364,7 +421,7 @@ Thank you for your continued subscription! 🙏
             </div>
 
             {/* Message preview */}
-            <div className="w-full rounded-lg border border-dashed border-muted-foreground/30 bg-muted/30 px-3 py-2">
+            <div className="w-full rounded-lg border border-dashed border-muted-foreground/30 bg-muted/30 px-3 py-2 max-h-28 overflow-y-auto">
               <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Message Preview
               </p>
@@ -375,8 +432,8 @@ Thank you for your continued subscription! 🙏
 
             {/* QR / Composite preview */}
             {isGenerating ? (
-              <div className="flex h-40 w-full flex-col items-center justify-center gap-3 rounded-lg border bg-muted">
-                <Loader2 className="size-8 animate-spin text-muted-foreground" />
+              <div className="flex h-32 w-full flex-col items-center justify-center gap-3 rounded-lg border bg-muted">
+                <Loader2 className="size-6 animate-spin text-muted-foreground" />
                 <p className="text-xs text-muted-foreground">Generating payment image…</p>
               </div>
             ) : compositeBlob ? (
@@ -384,9 +441,9 @@ Thank you for your continued subscription! 🙏
                 <img
                   src={URL.createObjectURL(compositeBlob)}
                   alt="Payment reminder with QR"
-                  className="w-56 rounded-lg border shadow-sm"
+                  className="w-48 rounded-lg border shadow-sm"
                 />
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-muted-foreground text-center">
                   {hasUpi
                     ? '✓ UPI QR — payer sees your shop name & amount'
                     : '⚠ No UPI linked — go to Settings to enable'}
@@ -405,12 +462,12 @@ Thank you for your continued subscription! 🙏
               <Button
                 onClick={sendWhatsAppReminder}
                 disabled={isSending || isGenerating}
-                className="h-12 w-full gap-2 bg-[#25D366] text-base font-semibold text-white hover:bg-[#20BD5A]"
+                className="h-11 w-full gap-2 bg-[#25D366] text-sm font-semibold text-white hover:bg-[#20BD5A]"
               >
                 {isSending ? (
-                  <Loader2 className="size-5 animate-spin" />
+                  <Loader2 className="size-4 animate-spin" />
                 ) : (
-                  <WhatsAppIcon className="size-5" />
+                  <WhatsAppIcon className="size-4" />
                 )}
                 {isSending ? 'Opening WhatsApp…' : 'Send Reminder + Image'}
               </Button>
@@ -420,15 +477,9 @@ Thank you for your continued subscription! 🙏
                   <Button
                     onClick={downloadComposite}
                     variant="outline"
-                    className="h-10 flex-1 gap-2 text-xs"
+                    className="h-9 flex-1 gap-1.5 text-xs"
                   >
-                    <svg
-                      className="size-4"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                    >
+                    <svg className="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                       <polyline points="7 10 12 15 17 10" />
                       <line x1="12" y1="15" x2="12" y2="3" />
@@ -442,10 +493,10 @@ Thank you for your continued subscription! 🙏
                     window.open(url, '_blank');
                   }}
                   variant="outline"
-                  className="h-10 flex-1 gap-2 text-xs"
+                  className="h-9 flex-1 gap-1.5 text-xs"
                 >
-                  <WhatsAppIcon className="size-4" />
-                  Text Only to {client.phoneNumber.slice(-4)}
+                  <WhatsAppIcon className="size-3.5" />
+                  Text Only
                 </Button>
               </div>
             </div>

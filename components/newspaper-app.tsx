@@ -11,20 +11,17 @@ import type { Client, ShopSettings } from '@/lib/types';
 import { NEWSPAPER_LABELS } from '@/lib/types';
 import * as XLSX from 'xlsx';
 
-// ─── Storage keys ─────────────────────────────────────────────────────────────
-
+// ─── Storage keys ──────────────────────────────────────────────────────────────
 const CLIENTS_KEY  = 'chandran-clients-v1';
-const SETTINGS_KEY = 'shopSettings'; // keep existing key — settings already work
+const SETTINGS_KEY = 'shopSettings';
 
-// ─── Storage helpers ──────────────────────────────────────────────────────────
-
+// ─── Storage helpers ───────────────────────────────────────────────────────────
 function loadClients(): Client[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(CLIENTS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as Client[];
-    // JSON.parse turns Date strings back into strings — rehydrate them
     return parsed.map((c) => ({ ...c, createdAt: new Date(c.createdAt) }));
   } catch {
     return [];
@@ -50,27 +47,22 @@ function loadShopSettings(): ShopSettings | null {
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
-
 export function NewspaperApp() {
-  const [clients, setClients]           = useState<Client[]>([]);
-  const [activeTab, setActiveTab]       = useState('clients');
+  const [clients, setClients]             = useState<Client[]>([]);
+  const [activeTab, setActiveTab]         = useState('clients');
   const [editingClient, setEditingClient] = useState<Client | null>(null);
-  const [shopSettings, setShopSettings] = useState<ShopSettings | null>(null);
+  const [shopSettings, setShopSettings]   = useState<ShopSettings | null>(null);
 
-  // ── Hydrate from localStorage on first mount ────────────────────────────────
   useEffect(() => {
     setClients(loadClients());
     setShopSettings(loadShopSettings());
   }, []);
 
-  // ── Persist clients to localStorage on every change ─────────────────────────
-  // The dependency on `clients` means this runs after every add / update / delete / toggle.
   useEffect(() => {
     saveClients(clients);
   }, [clients]);
 
-  // ── Client handlers (unchanged logic) ───────────────────────────────────────
-
+  // ── Client handlers ────────────────────────────────────────────────────────
   const handleAddClient = (clientData: Omit<Client, 'id' | 'createdAt'>) => {
     const newClient: Client = {
       ...clientData,
@@ -110,8 +102,21 @@ export function NewspaperApp() {
     );
   };
 
-  // ── Excel export (unchanged) ─────────────────────────────────────────────────
+  const handleDeleteClient = (id: string) => {
+    setClients((prev) => prev.filter((c) => c.id !== id));
+    setEditingClient(null);
+    setActiveTab('clients');
+  };
 
+  const handleInactiveClient = (id: string) => {
+    setClients((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, status: 'inactive' as any } : c))
+    );
+    setEditingClient(null);
+    setActiveTab('clients');
+  };
+
+  // ── Excel export ────────────────────────────────────────────────────────────
   const handleExportExcel = () => {
     if (clients.length === 0) return;
     const excelData = clients.map((client) => {
@@ -127,12 +132,16 @@ export function NewspaperApp() {
         Name: client.name,
         'Phone Number': client.phoneNumber,
         Address: client.address,
-        Status: client.status === 'paid' ? 'Paid' : 'Unpaid',
+        Status: client.status === 'paid' ? 'Paid' : client.status === 'inactive' ? 'Inactive' : 'Unpaid',
+        'Start Date': client.startDate
+          ? new Date(client.startDate).toLocaleDateString('en-IN')
+          : '',
         'Daily Thanthi (₹)': thanthiCost || '',
         'The Hindu (₹)': hinduCost || '',
         'Times of India (₹)': toiCost || '',
         'Dhinamalar (₹)': dhinamalarCost || '',
         'Petrol Charges (₹)': client.petrolCharges || '',
+        'Prepaid Amount (₹)': client.prepaidAmount || '',
         'Total Amount (₹)': client.totalAmount,
         'Created At':
           client.createdAt instanceof Date
@@ -143,27 +152,26 @@ export function NewspaperApp() {
     const workbook  = XLSX.utils.book_new();
     const worksheet = XLSX.utils.json_to_sheet(excelData);
     worksheet['!cols'] = [
-      { wch: 20 }, { wch: 15 }, { wch: 30 }, { wch: 10 },
+      { wch: 20 }, { wch: 15 }, { wch: 30 }, { wch: 10 }, { wch: 14 },
       { wch: 18 }, { wch: 15 }, { wch: 18 }, { wch: 15 },
-      { wch: 18 }, { wch: 18 }, { wch: 12 },
+      { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 12 },
     ];
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Clients');
     const date = new Date().toISOString().split('T')[0];
     XLSX.writeFile(workbook, `Chandran_News_Mart_Clients_${date}.xlsx`);
   };
 
-  // ── Render ────────────────────────────────────────────────────────────────────
-
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="sticky top-0 z-50 border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60">
         <div className="flex h-14 items-center justify-between px-4">
-          <div className="flex items-center gap-2">
-            <div className="flex size-8 items-center justify-center rounded-lg bg-primary">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="flex size-8 items-center justify-center rounded-lg bg-primary shrink-0">
               <Newspaper className="size-4 text-primary-foreground" />
             </div>
-            <h1 className="text-lg font-bold text-foreground">
+            <h1 className="text-base font-bold text-foreground truncate">
               {shopSettings?.shopName || 'Chandran News Mart'}
             </h1>
           </div>
@@ -172,17 +180,17 @@ export function NewspaperApp() {
             size="sm"
             onClick={handleExportExcel}
             disabled={clients.length === 0}
-            className="h-9 gap-2"
+            className="h-9 gap-2 shrink-0 ml-2"
           >
             <FileSpreadsheet className="size-4" />
-            <span className="hidden sm:inline">Export</span>
+            <span className="hidden sm:inline text-xs">Export</span>
           </Button>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="mx-auto max-w-lg px-4 pb-24">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-4">
+      <main className="mx-auto max-w-lg px-3 pb-24 pt-1">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-3">
           <TabsContent value="clients" className="mt-0">
             <ClientList
               clients={clients}
@@ -196,6 +204,8 @@ export function NewspaperApp() {
             <AddClientForm
               onAddClient={handleAddClient}
               onUpdateClient={handleUpdateClient}
+              onDeleteClient={handleDeleteClient}
+              onInactiveClient={handleInactiveClient}
               editingClient={editingClient}
               onCancelEdit={handleCancelEdit}
             />
@@ -203,13 +213,13 @@ export function NewspaperApp() {
 
           <TabsContent value="settings" className="mt-0">
             <div className="py-2">
-              <h2 className="mb-4 text-lg font-semibold">Shop &amp; Payment Settings</h2>
+              <h2 className="mb-4 text-base font-semibold">Shop &amp; Payment Settings</h2>
               <ShopSettingsForm {...({ onSettingsChange: setShopSettings } as any)} />
             </div>
           </TabsContent>
 
           {/* Bottom Navigation */}
-          <div className="fixed bottom-0 left-0 right-0 border-t bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60">
+          <div className="fixed bottom-0 left-0 right-0 border-t bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60 safe-area-bottom">
             <TabsList className="grid h-16 w-full grid-cols-3 gap-0 rounded-none border-0 bg-transparent p-0">
               <TabsTrigger
                 value="clients"
@@ -228,7 +238,7 @@ export function NewspaperApp() {
               >
                 <UserPlus className="size-5" />
                 <span className="text-xs font-medium">
-                  {editingClient ? 'Edit Client' : 'Add Client'}
+                  {editingClient ? 'Edit' : 'Add'}
                 </span>
               </TabsTrigger>
               <TabsTrigger

@@ -1,6 +1,6 @@
 export type NewspaperType = 'thanthi' | 'the-hindu' | 'times-of-india' | 'dhinamalar';
 
-export type PaymentStatus = 'paid' | 'unpaid';
+export type PaymentStatus = 'paid' | 'unpaid' | 'inactive';
 
 export interface NewspaperCost {
   newspaper: NewspaperType;
@@ -16,6 +16,8 @@ export interface Client {
   newspapers: NewspaperCost[];
   petrolCharges: number;
   totalAmount: number;
+  prepaidAmount?: number;  // Amount paid in advance (optional)
+  startDate?: string;      // ISO date string YYYY-MM-DD — used for overdue detection
   createdAt: Date;
 }
 
